@@ -19,11 +19,13 @@ The exported CSV includes:
 - row baseline
 - estimated millivolts
 
-The page also reports extraction metadata such as sample count, sample rate, duration, and ECG-derived rhythm measurements.
+The page also reports extraction metadata such as sample count, sample rate, duration, source pages, and ECG-derived rhythm measurements.
 
 ## PDF Requirements
 
 This tool is designed for vector-based EKG PDFs where the ECG trace is present as PDF drawing/path data. Scanned PDFs or image-only PDFs may not produce usable results.
+
+The browser extractor scans every page for compatible ECG trace rows, then concatenates those rows into one continuous sample stream. This supports short single-page recordings such as 30-second PDFs and longer multi-page recordings such as 1-5 minute PDFs when they use the same vector layout.
 
 The conversion assumes standard ECG paper calibration:
 
@@ -57,5 +59,5 @@ The static app is served from `index.html`. In the GitHub repository settings, e
 GitHub Pages will publish the app at:
 
 ```text
-https://YOUR_USERNAME.github.io/REPOSITORY_NAME/
+https://IsaacZhangg.github.io/ekg-extraction/
 ```

@@ -582,6 +582,48 @@
         metricRows.textContent = String(rows);
       }
 
+      function formatCount(value) {
+        return typeof value === "number" ? value.toLocaleString("en-US") : value;
+      }
+
+      function formatDuration(seconds) {
+        if (!Number.isFinite(seconds)) {
+          return "-";
+        }
+        if (seconds < 60) {
+          return `${seconds.toFixed(1)}s`;
+        }
+
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds - minutes * 60;
+        const secondsText =
+          Math.abs(remainingSeconds - Math.round(remainingSeconds)) < 0.05
+            ? String(Math.round(remainingSeconds)).padStart(2, "0")
+            : remainingSeconds.toFixed(1).padStart(4, "0");
+        return `${minutes}m ${secondsText}s`;
+      }
+
+      function formatPageList(pageNumbers) {
+        if (pageNumbers.length === 0) {
+          return "-";
+        }
+
+        const ranges = [];
+        let start = pageNumbers[0];
+        let end = pageNumbers[0];
+        for (const pageNumber of pageNumbers.slice(1)) {
+          if (pageNumber === end + 1) {
+            end = pageNumber;
+            continue;
+          }
+          ranges.push(start === end ? String(start) : `${start}-${end}`);
+          start = pageNumber;
+          end = pageNumber;
+        }
+        ranges.push(start === end ? String(start) : `${start}-${end}`);
+        return ranges.join(", ");
+      }
+
       function median(values) {
         if (values.length === 0) {
           return 0;
@@ -820,25 +862,40 @@
         });
       }
 
-      function extractionFromBlocks(blocks, pageNumber) {
-        const waveformBlocks = blocks.filter(isWaveformBlock);
-        const baselines = extractRowBaselines(blocks);
-        if (baselines.length !== 4 || waveformBlocks.length === 0) {
-          return null;
-        }
-
-        const rows = buildRows(waveformBlocks, baselines);
-        const sampleCount = rows.reduce((sum, row) => sum + row.points.length, 0);
-        if (sampleCount === 0 || rows.some((row) => row.points.length === 0)) {
-          return null;
-        }
-
+      function xDeltasFromRows(rows) {
         const xDeltas = [];
         for (const row of rows) {
           for (let index = 0; index < row.points.length - 1; index += 1) {
             xDeltas.push(row.points[index + 1].x - row.points[index].x);
           }
         }
+        return xDeltas;
+      }
+
+      function extractionFromBlocks(blocks, pageNumber) {
+        const waveformBlocks = blocks.filter(isWaveformBlock);
+        const baselines = extractRowBaselines(blocks);
+        if (baselines.length === 0 || waveformBlocks.length === 0) {
+          return null;
+        }
+
+        const rows = buildRows(waveformBlocks, baselines)
+          .filter((row) => row.points.length > 0)
+          .map((row) => ({
+            ...row,
+            pageNumber,
+            pageRowNumber: row.rowNumber,
+          }));
+        const sampleCount = rows.reduce((sum, row) => sum + row.points.length, 0);
+        if (sampleCount === 0) {
+          return null;
+        }
+
+        const xDeltas = xDeltasFromRows(rows);
+        if (xDeltas.length === 0) {
+          return null;
+        }
+
         const xStepPt = median(xDeltas);
         const pointsPerSecond = ECG_SPEED_MM_PER_SECOND / MM_PER_POINT;
         const sampleRateFromPdfSpacing = pointsPerSecond / xStepPt;
@@ -855,27 +912,56 @@
         };
       }
 
+      function combinePageExtractions(pageExtractions) {
+        const rows = [];
+        let rowNumber = 1;
+        for (const pageExtraction of pageExtractions) {
+          for (const row of pageExtraction.rows) {
+            rows.push({
+              ...row,
+              rowNumber,
+            });
+            rowNumber += 1;
+          }
+        }
+
+        const sampleCount = rows.reduce((sum, row) => sum + row.points.length, 0);
+        const xStepPt = median(xDeltasFromRows(rows));
+        const pointsPerSecond = ECG_SPEED_MM_PER_SECOND / MM_PER_POINT;
+        const sampleRateFromPdfSpacing = pointsPerSecond / xStepPt;
+        const sampleRate = Math.round(sampleRateFromPdfSpacing);
+
+        return {
+          pageNumbers: pageExtractions.map((extraction) => extraction.pageNumber),
+          rows,
+          sampleCount,
+          sampleRate,
+          sampleRateFromPdfSpacing,
+          xStepPt,
+          durationSeconds: sampleCount / sampleRate,
+        };
+      }
+
       async function extractFromPdf(file) {
         const data = new Uint8Array(await file.arrayBuffer());
         const loadingTask = pdfjsLib.getDocument({ data });
         const pdf = await loadingTask.promise;
-        const candidates = [];
+        const pageExtractions = [];
 
         for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
           const blocks = await pathBlocksForPage(pdf, pageNumber);
           const extraction = extractionFromBlocks(blocks, pageNumber);
           if (extraction) {
-            candidates.push(extraction);
+            pageExtractions.push(extraction);
           }
         }
 
         await pdf.destroy();
-        if (candidates.length === 0) {
+        if (pageExtractions.length === 0) {
           throw new Error("No vector ECG trace was found in this PDF.");
         }
 
-        candidates.sort((first, second) => second.sampleCount - first.sampleCount);
-        return candidates[0];
+        return combinePageExtractions(pageExtractions);
       }
 
       function waveformSamplesFromExtraction(extraction) {
@@ -888,6 +974,8 @@
               sampleIndex,
               timeSeconds: sampleIndex / extraction.sampleRate,
               row: row.rowNumber,
+              pageNumber: row.pageNumber,
+              pageRowNumber: row.pageRowNumber,
               rowSampleIndex,
               point,
               millivolts: (row.baselineY - point.y) * MV_PER_POINT_Y,
@@ -1360,6 +1448,8 @@
           "instant_hr_bpm",
           "qrs_width_ms",
           "rhythm_flags",
+          "source_page",
+          "source_page_row",
         ];
         const lines = [headers.join(",")];
         const analysis = extraction.analysis ?? currentAnalysis;
@@ -1388,6 +1478,8 @@
                 : "",
               qrs_width_ms: beat ? beat.qrsWidthMs.toFixed(3) : "",
               rhythm_flags: rhythmFlags,
+              source_page: row.pageNumber,
+              source_page_row: row.pageRowNumber,
             };
             lines.push(headers.map((header) => csvEscape(record[header])).join(","));
             sampleIndex += 1;
@@ -1397,14 +1489,24 @@
         return `${lines.join("\n")}\n`;
       }
 
-      function renderPreview(csv) {
-        const rows = csv.trim().split("\n").slice(1, 11);
-        previewCount.textContent = rows.length === 1 ? "1 row" : `${rows.length} rows`;
-        if (rows.length === 0) {
+      function renderPreview(csv, totalRows = 0) {
+        const trimmed = csv.trim();
+        if (!trimmed) {
+          previewCount.textContent = "0 rows";
           previewBody.innerHTML =
             '<tr><td class="empty" colspan="6">No data extracted</td></tr>';
           return;
         }
+
+        const rows = trimmed.split("\n", 11).slice(1);
+        const shownRows = rows.length;
+        const rowTotal = totalRows || shownRows;
+        previewCount.textContent =
+          shownRows === rowTotal
+            ? shownRows === 1
+              ? "1 row"
+              : `${formatCount(shownRows)} rows`
+            : `${formatCount(shownRows)} of ${formatCount(rowTotal)} rows`;
 
         previewBody.innerHTML = rows
           .map((line) => {
@@ -1478,19 +1580,23 @@
           currentAnalysis = analyzeRhythm(extraction);
           extraction.analysis = currentAnalysis;
           currentCsv = csvFromExtraction(extraction);
-          renderPreview(currentCsv);
+          renderPreview(currentCsv, extraction.sampleCount);
           renderRhythm(currentAnalysis);
           setMetrics({
-            samples: extraction.sampleCount,
-            duration: `${extraction.durationSeconds.toFixed(1)}s`,
+            samples: formatCount(extraction.sampleCount),
+            duration: formatDuration(extraction.durationSeconds),
             rate: `${extraction.sampleRate} Hz`,
-            rows: extraction.rows.map((row) => row.points.length).join(" / "),
+            rows: `${formatCount(extraction.rows.length)} rows / ${
+              extraction.pageNumbers.length
+            } page${extraction.pageNumbers.length === 1 ? "" : "s"}`,
           });
           downloadButton.disabled = false;
           setStatus(
             [
-              `Page: ${extraction.pageNumber}`,
-              `Samples: ${extraction.sampleCount}`,
+              `Pages: ${formatPageList(extraction.pageNumbers)}`,
+              `Rows: ${formatCount(extraction.rows.length)}`,
+              `Samples: ${formatCount(extraction.sampleCount)}`,
+              `Duration: ${formatDuration(extraction.durationSeconds)}`,
               `Sample rate: ${extraction.sampleRate} Hz`,
               `PDF x-derived rate: ${extraction.sampleRateFromPdfSpacing.toFixed(6)} Hz`,
               `x step: ${extraction.xStepPt.toFixed(8)} pt`,
