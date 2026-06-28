@@ -1079,93 +1079,64 @@
         return { peaks, highpass, integrated, threshold };
       }
 
-      function qrsBaselineMillivolts(signal, peak, sampleRate) {
-        const shoulderStart = Math.round(0.12 * sampleRate);
-        const shoulderEnd = Math.round(0.22 * sampleRate);
-        const shoulderValues = [];
-
-        for (
-          let index = Math.max(0, peak - shoulderEnd);
-          index < Math.max(0, peak - shoulderStart);
-          index += 1
-        ) {
-          shoulderValues.push(signal[index]);
-        }
-        for (
-          let index = Math.min(signal.length, peak + shoulderStart);
-          index < Math.min(signal.length, peak + shoulderEnd);
-          index += 1
-        ) {
-          shoulderValues.push(signal[index]);
-        }
-
-        if (shoulderValues.length >= 3) {
-          return median(shoulderValues);
-        }
-
-        const fallbackStart = Math.max(0, peak - Math.round(0.16 * sampleRate));
-        const fallbackEnd = Math.min(
-          signal.length - 1,
-          peak + Math.round(0.16 * sampleRate),
-        );
-        return (signal[fallbackStart] + signal[fallbackEnd]) / 2;
-      }
-
       function estimateQrsWidthMs(peak, signal, sampleRate) {
-        const baseline = qrsBaselineMillivolts(signal, peak, sampleRate);
-        const searchSamples = Math.round(0.16 * sampleRate);
-        const peakSearchSamples = Math.round(0.06 * sampleRate);
-        const start = Math.max(0, peak - searchSamples);
+        const searchSamples = Math.round(0.09 * sampleRate);
+        const peakSearchSamples = Math.round(0.045 * sampleRate);
+        const envelopeRadius = Math.max(1, Math.round(0.006 * sampleRate));
+        const start = Math.max(1, peak - searchSamples);
         const end = Math.min(signal.length - 1, peak + searchSamples);
+        if (end <= start) {
+          return 0;
+        }
+
+        const slopeEnvelope = [];
+        for (let index = start; index <= end; index += 1) {
+          let maxSlope = 0;
+          for (
+            let neighbor = Math.max(1, index - envelopeRadius);
+            neighbor <= Math.min(signal.length - 1, index + envelopeRadius);
+            neighbor += 1
+          ) {
+            maxSlope = Math.max(
+              maxSlope,
+              Math.abs(signal[neighbor] - signal[neighbor - 1]),
+            );
+          }
+          slopeEnvelope.push(maxSlope);
+        }
+
+        const envelopeAt = (index) => slopeEnvelope[index - start] ?? 0;
         const peakStart = Math.max(start, peak - peakSearchSamples);
         const peakEnd = Math.min(end, peak + peakSearchSamples);
         let qrsPeak = peak;
 
         for (let index = peakStart; index <= peakEnd; index += 1) {
-          if (
-            Math.abs(signal[index] - baseline) >
-            Math.abs(signal[qrsPeak] - baseline)
-          ) {
+          if (envelopeAt(index) > envelopeAt(qrsPeak)) {
             qrsPeak = index;
           }
         }
 
-        const peakMagnitude = Math.abs(signal[qrsPeak] - baseline);
-        if (peakMagnitude <= 0) {
+        const peakSlope = envelopeAt(qrsPeak);
+        if (peakSlope <= 0) {
           return 0;
         }
 
-        const level = Math.max(0.02, 0.05 * peakMagnitude);
-        const quietSamples = Math.max(2, Math.round(0.012 * sampleRate));
-        let left = start;
-        let quietCount = 0;
-        for (let index = qrsPeak; index >= start; index -= 1) {
-          if (Math.abs(signal[index] - baseline) <= level) {
-            quietCount += 1;
-            if (quietCount >= quietSamples) {
-              left = index + quietSamples - 1;
-              break;
-            }
-          } else {
-            quietCount = 0;
+        const noiseFloor = Math.min(percentile(slopeEnvelope, 0.2), peakSlope * 0.5);
+        const level = noiseFloor + 0.12 * (peakSlope - noiseFloor);
+        let left = null;
+        let right = null;
+        for (let index = start; index <= end; index += 1) {
+          if (envelopeAt(index) > level) {
+            left ??= index;
+            right = index;
           }
         }
 
-        let right = end;
-        quietCount = 0;
-        for (let index = qrsPeak; index <= end; index += 1) {
-          if (Math.abs(signal[index] - baseline) <= level) {
-            quietCount += 1;
-            if (quietCount >= quietSamples) {
-              right = index - quietSamples + 1;
-              break;
-            }
-          } else {
-            quietCount = 0;
-          }
+        if (left === null || right === null) {
+          return 0;
         }
 
-        return ((right - left) / sampleRate) * 1000;
+        return ((right - left + 1) / sampleRate) * 1000;
       }
 
       function normalizedVector(values) {
