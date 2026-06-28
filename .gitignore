@@ -1,0 +1,8 @@
+.DS_Store
+.firecrawl/
+.ruff_cache/
+.venv/
+__pycache__/
+*.py[cod]
+*.pdf
+extracted/

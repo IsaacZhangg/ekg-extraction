@@ -1,0 +1,1535 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EKG PDF to CSV</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1d2527;
+        --muted: #687274;
+        --line: #d7dddb;
+        --paper: #f7f5ef;
+        --panel: #ffffff;
+        --accent: #b91f32;
+        --accent-dark: #841827;
+        --signal: #0f6b62;
+        --shadow: 0 24px 70px rgb(35 44 40 / 12%);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        color: var(--ink);
+        background:
+          linear-gradient(90deg, rgb(185 31 50 / 4%) 1px, transparent 1px),
+          linear-gradient(0deg, rgb(185 31 50 / 4%) 1px, transparent 1px),
+          var(--paper);
+        background-size: 22px 22px;
+        font-family: ui-serif, Georgia, "Times New Roman", serif;
+      }
+
+      button,
+      input,
+      table {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+      }
+
+      .shell {
+        width: min(1120px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 32px 0;
+      }
+
+      .masthead {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 24px;
+        align-items: end;
+        margin-bottom: 20px;
+        border-bottom: 2px solid var(--ink);
+        padding-bottom: 18px;
+      }
+
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--accent-dark);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.78rem;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2rem, 5vw, 4.75rem);
+        font-weight: 700;
+        line-height: 0.92;
+        letter-spacing: 0;
+      }
+
+      .build-tag {
+        justify-self: end;
+        border: 1px solid var(--ink);
+        padding: 8px 10px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.78rem;
+        background: var(--panel);
+      }
+
+      .workbench {
+        display: grid;
+        grid-template-columns: minmax(280px, 1fr) 320px;
+        gap: 18px;
+        align-items: stretch;
+      }
+
+      .dropzone,
+      .control-panel,
+      .metrics,
+      .rhythm-panel,
+      .preview-panel,
+      .status-panel {
+        border: 1px solid var(--line);
+        background: rgb(255 255 255 / 92%);
+        box-shadow: var(--shadow);
+      }
+
+      .dropzone {
+        position: relative;
+        display: grid;
+        min-height: 220px;
+        padding: 22px;
+        cursor: pointer;
+        transition:
+          transform 160ms ease,
+          border-color 160ms ease,
+          background 160ms ease;
+      }
+
+      .dropzone:hover,
+      .dropzone.is-dragging {
+        transform: translateY(-2px);
+        border-color: var(--accent);
+        background: #fffdf7;
+      }
+
+      .dropzone input {
+        position: absolute;
+        inset: 0;
+        cursor: pointer;
+        opacity: 0;
+      }
+
+      .drop-inner {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 18px;
+        min-width: 0;
+      }
+
+      .file-mark {
+        width: 56px;
+        height: 70px;
+        display: grid;
+        place-items: center;
+        border: 2px solid var(--ink);
+        border-top-right-radius: 12px;
+        color: var(--accent-dark);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.82rem;
+        font-weight: 700;
+        background: #fff;
+      }
+
+      .drop-title {
+        align-self: end;
+        margin: 0;
+        max-width: 560px;
+        font-size: clamp(1.6rem, 4vw, 3.2rem);
+        line-height: 1;
+        letter-spacing: 0;
+      }
+
+      .file-name {
+        overflow: hidden;
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.86rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .control-panel {
+        display: grid;
+        gap: 14px;
+        padding: 18px;
+      }
+
+      .button-row {
+        display: grid;
+        gap: 10px;
+      }
+
+      .action {
+        min-height: 48px;
+        padding: 0 16px;
+        color: #fff;
+        cursor: pointer;
+        background: var(--ink);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        transition:
+          transform 130ms ease,
+          background 130ms ease,
+          opacity 130ms ease;
+      }
+
+      .action:hover:not(:disabled) {
+        transform: translateY(-1px);
+        background: var(--accent-dark);
+      }
+
+      .action.secondary {
+        color: var(--ink);
+        border: 1px solid var(--ink);
+        background: #fff;
+      }
+
+      .action.secondary:hover:not(:disabled) {
+        color: #fff;
+        background: var(--signal);
+      }
+
+      .action:disabled {
+        cursor: not-allowed;
+        opacity: 0.36;
+      }
+
+      .status-panel {
+        min-height: 110px;
+        padding: 14px;
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.83rem;
+        line-height: 1.45;
+        white-space: pre-wrap;
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1px;
+        margin-top: 18px;
+        overflow: hidden;
+        background: var(--line);
+      }
+
+      .metric {
+        min-width: 0;
+        padding: 16px;
+        background: #fff;
+      }
+
+      .metric-label {
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+      }
+
+      .metric-value {
+        margin-top: 10px;
+        overflow-wrap: anywhere;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: clamp(1.2rem, 2vw, 2rem);
+        font-weight: 800;
+      }
+
+      .rhythm-panel {
+        margin-top: 18px;
+        overflow: hidden;
+      }
+
+      .rhythm-heading {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        padding: 12px 14px;
+        background: #fff;
+      }
+
+      .rhythm-heading h2 {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .rhythm-note {
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.76rem;
+      }
+
+      .rhythm-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1px;
+        background: var(--line);
+      }
+
+      .rhythm-card {
+        min-height: 126px;
+        padding: 14px;
+        background: #fff;
+      }
+
+      .rhythm-label {
+        min-height: 36px;
+        font-weight: 700;
+        line-height: 1.1;
+      }
+
+      .rhythm-state {
+        display: inline-block;
+        margin-top: 12px;
+        border: 1px solid var(--line);
+        padding: 5px 7px;
+        color: var(--muted);
+        background: #faf9f4;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .rhythm-detail {
+        margin-top: 10px;
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.75rem;
+        line-height: 1.35;
+      }
+
+      .rhythm-card.is-flagged {
+        border-top: 4px solid var(--accent);
+      }
+
+      .rhythm-card.is-flagged .rhythm-state {
+        border-color: var(--accent);
+        color: #fff;
+        background: var(--accent);
+      }
+
+      .rhythm-card.is-clear {
+        border-top: 4px solid var(--signal);
+      }
+
+      .rhythm-card.is-clear .rhythm-state {
+        border-color: var(--signal);
+        color: #fff;
+        background: var(--signal);
+      }
+
+      .rhythm-card.is-review {
+        border-top: 4px solid #a8761a;
+      }
+
+      .rhythm-card.is-review .rhythm-state {
+        border-color: #a8761a;
+        color: #fff;
+        background: #a8761a;
+      }
+
+      .preview-panel {
+        margin-top: 18px;
+        overflow: hidden;
+      }
+
+      .preview-heading {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        padding: 12px 14px;
+        background: #fff;
+      }
+
+      .preview-heading h2 {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .preview-count {
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.78rem;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #fff;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.78rem;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 9px 10px;
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      th:first-child,
+      td:first-child {
+        text-align: left;
+      }
+
+      th {
+        color: var(--muted);
+        font-weight: 700;
+        background: #faf9f4;
+      }
+
+      .empty {
+        color: var(--muted);
+        text-align: center;
+      }
+
+      @media (max-width: 820px) {
+        .masthead,
+        .workbench,
+        .metrics,
+        .rhythm-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .build-tag {
+          justify-self: start;
+        }
+
+        .shell {
+          width: min(100vw - 20px, 720px);
+          padding: 20px 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">PDF vector extraction</p>
+          <h1>EKG PDF to CSV</h1>
+        </div>
+        <div class="build-tag">25 mm/s | 10 mm/mV</div>
+      </header>
+
+      <section class="workbench">
+        <label class="dropzone" id="dropZone">
+          <input id="fileInput" type="file" accept="application/pdf,.pdf" />
+          <span class="drop-inner">
+            <span class="file-mark">PDF</span>
+            <strong class="drop-title">Choose or drop an EKG PDF</strong>
+            <span class="file-name" id="fileName">No file selected</span>
+          </span>
+        </label>
+
+        <aside class="control-panel">
+          <div class="button-row">
+            <button class="action" id="extractButton" type="button" disabled>
+              Extract data
+            </button>
+            <button
+              class="action secondary"
+              id="downloadButton"
+              type="button"
+              disabled
+            >
+              Download CSV
+            </button>
+          </div>
+          <div class="status-panel" id="status">Idle</div>
+        </aside>
+      </section>
+
+      <section class="metrics" aria-label="Extraction metrics">
+        <div class="metric">
+          <div class="metric-label">Samples</div>
+          <div class="metric-value" id="metricSamples">-</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Duration</div>
+          <div class="metric-value" id="metricDuration">-</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Rate</div>
+          <div class="metric-value" id="metricRate">-</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Rows</div>
+          <div class="metric-value" id="metricRows">-</div>
+        </div>
+      </section>
+
+      <section class="rhythm-panel" aria-label="Rhythm screening">
+        <div class="rhythm-heading">
+          <h2>Rhythm flags</h2>
+          <span class="rhythm-note" id="rhythmNote">Screening only</span>
+        </div>
+        <div class="rhythm-grid" id="rhythmGrid"></div>
+      </section>
+
+      <section class="preview-panel">
+        <div class="preview-heading">
+          <h2>CSV preview</h2>
+          <span class="preview-count" id="previewCount">0 rows</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>sample_index</th>
+                <th>time_seconds</th>
+                <th>row</th>
+                <th>pdf_x_pt</th>
+                <th>pdf_y_pt</th>
+                <th>millivolts</th>
+              </tr>
+            </thead>
+            <tbody id="previewBody">
+              <tr>
+                <td class="empty" colspan="6">No data extracted</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module">
+      import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.mjs";
+
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.mjs";
+
+      const MM_PER_POINT = 25.4 / 72;
+      const ECG_SPEED_MM_PER_SECOND = 25;
+      const ECG_GAIN_MM_PER_MV = 10;
+      const MV_PER_POINT_Y = MM_PER_POINT / ECG_GAIN_MM_PER_MV;
+      const DRAW_OPS = {
+        moveTo: 0,
+        lineTo: 1,
+        curveTo: 2,
+        quadraticCurveTo: 3,
+        closePath: 4,
+      };
+      const PDFJS_PATH_OPS = {
+        moveTo: 13,
+        lineTo: 14,
+        curveTo: 15,
+        curveTo2: 16,
+        curveTo3: 17,
+        closePath: 18,
+        rectangle: 19,
+      };
+
+      const fileInput = document.querySelector("#fileInput");
+      const fileName = document.querySelector("#fileName");
+      const dropZone = document.querySelector("#dropZone");
+      const extractButton = document.querySelector("#extractButton");
+      const downloadButton = document.querySelector("#downloadButton");
+      const statusBox = document.querySelector("#status");
+      const metricSamples = document.querySelector("#metricSamples");
+      const metricDuration = document.querySelector("#metricDuration");
+      const metricRate = document.querySelector("#metricRate");
+      const metricRows = document.querySelector("#metricRows");
+      const previewBody = document.querySelector("#previewBody");
+      const previewCount = document.querySelector("#previewCount");
+      const rhythmGrid = document.querySelector("#rhythmGrid");
+      const rhythmNote = document.querySelector("#rhythmNote");
+
+      let selectedFile = null;
+      let currentCsv = "";
+      let currentCsvName = "ekg_samples.csv";
+      let currentAnalysis = null;
+
+      function setStatus(message) {
+        statusBox.textContent = message;
+      }
+
+      function setMetrics({ samples = "-", duration = "-", rate = "-", rows = "-" }) {
+        metricSamples.textContent = String(samples);
+        metricDuration.textContent = String(duration);
+        metricRate.textContent = String(rate);
+        metricRows.textContent = String(rows);
+      }
+
+      function median(values) {
+        if (values.length === 0) {
+          return 0;
+        }
+        const sorted = [...values].sort((a, b) => a - b);
+        const middle = Math.floor(sorted.length / 2);
+        if (sorted.length % 2 === 1) {
+          return sorted[middle];
+        }
+        return (sorted[middle - 1] + sorted[middle]) / 2;
+      }
+
+      function mean(values) {
+        if (values.length === 0) {
+          return 0;
+        }
+        return values.reduce((sum, value) => sum + value, 0) / values.length;
+      }
+
+      function standardDeviation(values) {
+        if (values.length < 2) {
+          return 0;
+        }
+        const average = mean(values);
+        return Math.sqrt(
+          values.reduce((sum, value) => sum + (value - average) ** 2, 0) /
+            values.length,
+        );
+      }
+
+      function percentile(values, fraction) {
+        if (values.length === 0) {
+          return 0;
+        }
+        const sorted = [...values].sort((a, b) => a - b);
+        const index = Math.min(
+          sorted.length - 1,
+          Math.max(0, Math.floor(fraction * sorted.length)),
+        );
+        return sorted[index];
+      }
+
+      function dedupePoints(points) {
+        const deduped = [];
+        for (const point of points) {
+          const previous = deduped.at(-1);
+          if (
+            !previous ||
+            Math.abs(previous.x - point.x) > 0.0001 ||
+            Math.abs(previous.y - point.y) > 0.0001
+          ) {
+            deduped.push(point);
+          }
+        }
+        return deduped;
+      }
+
+      function medianDx(points) {
+        if (points.length < 2) {
+          return 0;
+        }
+        const deltas = [];
+        for (let index = 0; index < points.length - 1; index += 1) {
+          deltas.push(points[index + 1].x - points[index].x);
+        }
+        return median(deltas);
+      }
+
+      function parsePathBuffer(pathBuffer) {
+        const points = [];
+        if (!pathBuffer) {
+          return points;
+        }
+
+        for (let index = 0; index < pathBuffer.length; ) {
+          const op = pathBuffer[index];
+          index += 1;
+
+          if (op === DRAW_OPS.moveTo || op === DRAW_OPS.lineTo) {
+            points.push({ x: pathBuffer[index], y: pathBuffer[index + 1] });
+            index += 2;
+          } else if (op === DRAW_OPS.curveTo) {
+            index += 4;
+            points.push({ x: pathBuffer[index], y: pathBuffer[index + 1] });
+            index += 2;
+          } else if (op === DRAW_OPS.quadraticCurveTo) {
+            index += 2;
+            points.push({ x: pathBuffer[index], y: pathBuffer[index + 1] });
+            index += 2;
+          } else if (op === DRAW_OPS.closePath) {
+          } else {
+            throw new Error(`Unexpected path command ${op}`);
+          }
+        }
+        return points;
+      }
+
+      function parseOperatorPath(operators, coords) {
+        const points = [];
+        let coordIndex = 0;
+
+        for (const op of operators) {
+          if (op === PDFJS_PATH_OPS.moveTo || op === PDFJS_PATH_OPS.lineTo) {
+            points.push({ x: coords[coordIndex], y: coords[coordIndex + 1] });
+            coordIndex += 2;
+          } else if (op === PDFJS_PATH_OPS.curveTo) {
+            points.push({ x: coords[coordIndex + 4], y: coords[coordIndex + 5] });
+            coordIndex += 6;
+          } else if (
+            op === PDFJS_PATH_OPS.curveTo2 ||
+            op === PDFJS_PATH_OPS.curveTo3
+          ) {
+            points.push({ x: coords[coordIndex + 2], y: coords[coordIndex + 3] });
+            coordIndex += 4;
+          } else if (op === PDFJS_PATH_OPS.rectangle) {
+            const x = coords[coordIndex];
+            const y = coords[coordIndex + 1];
+            const width = coords[coordIndex + 2];
+            const height = coords[coordIndex + 3];
+            points.push(
+              { x, y },
+              { x: x + width, y },
+              { x: x + width, y: y + height },
+              { x, y: y + height },
+            );
+            coordIndex += 4;
+          } else if (op === PDFJS_PATH_OPS.closePath) {
+          } else {
+            throw new Error(`Unexpected path operator ${op}`);
+          }
+        }
+
+        return points;
+      }
+
+      function parseConstructPathArgs(args) {
+        if (Array.isArray(args?.[0]) && Array.isArray(args?.[1])) {
+          return parseOperatorPath(args[0], args[1]);
+        }
+
+        return parsePathBuffer(args?.[1]?.[0]);
+      }
+
+      async function pathBlocksForPage(pdf, pageNumber) {
+        const page = await pdf.getPage(pageNumber);
+        const operatorList = await page.getOperatorList();
+        const blocks = [];
+        const constructPath = pdfjsLib.OPS.constructPath;
+
+        for (let index = 0; index < operatorList.fnArray.length; index += 1) {
+          if (operatorList.fnArray[index] !== constructPath) {
+            continue;
+          }
+          const args = operatorList.argsArray[index];
+          const points = parseConstructPathArgs(args);
+          if (points.length > 0) {
+            blocks.push({ position: index, points });
+          }
+        }
+        page.cleanup();
+        return blocks;
+      }
+
+      function isWaveformBlock(block) {
+        const points = dedupePoints(block.points);
+        if (points.length < 40) {
+          return false;
+        }
+
+        const xValues = points.map((point) => point.x);
+        if (Math.max(...xValues) - Math.min(...xValues) < 10) {
+          return false;
+        }
+
+        const dx = medianDx(points);
+        return dx > 0.23 && dx < 0.24;
+      }
+
+      function extractRowBaselines(blocks) {
+        const baselines = [];
+        for (const block of blocks) {
+          const points = block.points;
+          if (points.length < 8) {
+            continue;
+          }
+
+          for (let index = 0; index < points.length - 1; index += 2) {
+            const first = points[index];
+            const second = points[index + 1];
+            if (
+              Math.abs(first.y - second.y) < 0.0001 &&
+              first.x < 25 &&
+              second.x > 580 &&
+              first.y > 100 &&
+              first.y < 750
+            ) {
+              baselines.push(Number(first.y.toFixed(4)));
+            }
+          }
+        }
+
+        const unique = [...new Set(baselines)].sort((a, b) => a - b);
+        return unique
+          .filter((value) =>
+            [79.0074, 759.3223, 712.9927].every(
+              (border) => Math.abs(value - border) >= 1,
+            ),
+          )
+          .slice(0, 4);
+      }
+
+      function buildRows(waveformBlocks, baselines) {
+        const rowPoints = baselines.map(() => []);
+        for (const block of waveformBlocks) {
+          const points = dedupePoints(block.points);
+          const medianY = median(points.map((point) => point.y));
+          let rowIndex = 0;
+          let bestDistance = Number.POSITIVE_INFINITY;
+
+          baselines.forEach((baseline, index) => {
+            const distance = Math.abs(baseline - medianY);
+            if (distance < bestDistance) {
+              rowIndex = index;
+              bestDistance = distance;
+            }
+          });
+
+          rowPoints[rowIndex].push(...points);
+        }
+
+        return baselines.map((baselineY, index) => {
+          const points = dedupePoints(
+            rowPoints[index].sort((first, second) => first.x - second.x),
+          );
+          return { rowNumber: index + 1, baselineY, points };
+        });
+      }
+
+      function extractionFromBlocks(blocks, pageNumber) {
+        const waveformBlocks = blocks.filter(isWaveformBlock);
+        const baselines = extractRowBaselines(blocks);
+        if (baselines.length !== 4 || waveformBlocks.length === 0) {
+          return null;
+        }
+
+        const rows = buildRows(waveformBlocks, baselines);
+        const sampleCount = rows.reduce((sum, row) => sum + row.points.length, 0);
+        if (sampleCount === 0 || rows.some((row) => row.points.length === 0)) {
+          return null;
+        }
+
+        const xDeltas = [];
+        for (const row of rows) {
+          for (let index = 0; index < row.points.length - 1; index += 1) {
+            xDeltas.push(row.points[index + 1].x - row.points[index].x);
+          }
+        }
+        const xStepPt = median(xDeltas);
+        const pointsPerSecond = ECG_SPEED_MM_PER_SECOND / MM_PER_POINT;
+        const sampleRateFromPdfSpacing = pointsPerSecond / xStepPt;
+        const sampleRate = Math.round(sampleRateFromPdfSpacing);
+
+        return {
+          pageNumber,
+          rows,
+          sampleCount,
+          sampleRate,
+          sampleRateFromPdfSpacing,
+          xStepPt,
+          durationSeconds: sampleCount / sampleRate,
+        };
+      }
+
+      async function extractFromPdf(file) {
+        const data = new Uint8Array(await file.arrayBuffer());
+        const loadingTask = pdfjsLib.getDocument({ data });
+        const pdf = await loadingTask.promise;
+        const candidates = [];
+
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+          const blocks = await pathBlocksForPage(pdf, pageNumber);
+          const extraction = extractionFromBlocks(blocks, pageNumber);
+          if (extraction) {
+            candidates.push(extraction);
+          }
+        }
+
+        await pdf.destroy();
+        if (candidates.length === 0) {
+          throw new Error("No vector ECG trace was found in this PDF.");
+        }
+
+        candidates.sort((first, second) => second.sampleCount - first.sampleCount);
+        return candidates[0];
+      }
+
+      function waveformSamplesFromExtraction(extraction) {
+        const samples = [];
+        let sampleIndex = 0;
+
+        for (const row of extraction.rows) {
+          row.points.forEach((point, rowSampleIndex) => {
+            samples.push({
+              sampleIndex,
+              timeSeconds: sampleIndex / extraction.sampleRate,
+              row: row.rowNumber,
+              rowSampleIndex,
+              point,
+              millivolts: (row.baselineY - point.y) * MV_PER_POINT_Y,
+            });
+            sampleIndex += 1;
+          });
+        }
+
+        return samples;
+      }
+
+      function centeredMovingAverage(values, halfWindow) {
+        const sums = [0];
+        for (const value of values) {
+          sums.push(sums.at(-1) + value);
+        }
+
+        return values.map((_, index) => {
+          const start = Math.max(0, index - halfWindow);
+          const end = Math.min(values.length, index + halfWindow + 1);
+          return (sums[end] - sums[start]) / (end - start);
+        });
+      }
+
+      function trailingMovingAverage(values, windowSize) {
+        const averaged = [];
+        let sum = 0;
+        for (let index = 0; index < values.length; index += 1) {
+          sum += values[index];
+          if (index >= windowSize) {
+            sum -= values[index - windowSize];
+          }
+          averaged.push(sum / Math.min(windowSize, index + 1));
+        }
+        return averaged;
+      }
+
+      function detectRPeaks(samples, sampleRate) {
+        const signal = samples.map((sample) => sample.millivolts);
+        const baselineWindow = Math.max(1, Math.round(0.4 * sampleRate));
+        const baseline = centeredMovingAverage(signal, baselineWindow);
+        const highpass = signal.map((value, index) => value - baseline[index]);
+        const derivative = highpass.map((value, index) =>
+          index === 0 ? 0 : value - highpass[index - 1],
+        );
+        const energy = derivative.map((value) => value ** 2);
+        const integrated = trailingMovingAverage(
+          energy,
+          Math.max(3, Math.round(0.08 * sampleRate)),
+        );
+        const energyMedian = median(integrated);
+        const energyP98 = percentile(integrated, 0.98);
+        const threshold = energyMedian + 0.3 * (energyP98 - energyMedian);
+        const refractorySamples = Math.max(1, Math.round(0.16 * sampleRate));
+        const peaks = [];
+
+        if (threshold <= energyMedian) {
+          return { peaks, highpass, integrated, threshold };
+        }
+
+        const edgeMarginSamples = Math.round(0.25 * sampleRate);
+        for (
+          let index = Math.max(1, edgeMarginSamples);
+          index < integrated.length - 1 - edgeMarginSamples;
+          index += 1
+        ) {
+          if (
+            integrated[index] <= threshold ||
+            integrated[index] < integrated[index - 1] ||
+            integrated[index] <= integrated[index + 1]
+          ) {
+            continue;
+          }
+
+          const refineStart = Math.max(0, index - Math.round(0.12 * sampleRate));
+          const refineEnd = Math.min(
+            highpass.length,
+            index + Math.round(0.08 * sampleRate) + 1,
+          );
+          let refinedPeak = refineStart;
+          for (let candidate = refineStart + 1; candidate < refineEnd; candidate += 1) {
+            if (Math.abs(highpass[candidate]) > Math.abs(highpass[refinedPeak])) {
+              refinedPeak = candidate;
+            }
+          }
+
+          const previousPeak = peaks.at(-1);
+          if (
+            previousPeak !== undefined &&
+            refinedPeak - previousPeak <= refractorySamples
+          ) {
+            if (Math.abs(highpass[refinedPeak]) > Math.abs(highpass[previousPeak])) {
+              peaks[peaks.length - 1] = refinedPeak;
+            }
+            continue;
+          }
+
+          peaks.push(refinedPeak);
+        }
+
+        return { peaks, highpass, integrated, threshold };
+      }
+
+      function estimateQrsWidthMs(peak, highpass, sampleRate) {
+        const searchSamples = Math.round(0.16 * sampleRate);
+        const start = Math.max(0, peak - searchSamples);
+        const end = Math.min(highpass.length - 1, peak + searchSamples);
+        const peakMagnitude = Math.abs(highpass[peak]);
+        if (peakMagnitude <= 0) {
+          return 0;
+        }
+
+        const level = Math.max(0.02, 0.1 * peakMagnitude);
+        let left = peak;
+        while (left > start && Math.abs(highpass[left]) > level) {
+          left -= 1;
+        }
+
+        let right = peak;
+        while (right < end && Math.abs(highpass[right]) > level) {
+          right += 1;
+        }
+
+        return ((right - left) / sampleRate) * 1000;
+      }
+
+      function normalizedVector(values) {
+        const average = mean(values);
+        const centered = values.map((value) => value - average);
+        const norm = Math.sqrt(centered.reduce((sum, value) => sum + value ** 2, 0));
+        if (norm === 0) {
+          return centered;
+        }
+        return centered.map((value) => value / norm);
+      }
+
+      function correlation(first, second) {
+        if (first.length !== second.length || first.length === 0) {
+          return 0;
+        }
+        return first.reduce((sum, value, index) => sum + value * second[index], 0);
+      }
+
+      function beatTemplates(peaks, highpass, sampleRate) {
+        const before = Math.round(0.1 * sampleRate);
+        const after = Math.round(0.14 * sampleRate);
+        return peaks.map((peak) => {
+          if (peak - before < 0 || peak + after >= highpass.length) {
+            return null;
+          }
+          return normalizedVector(highpass.slice(peak - before, peak + after + 1));
+        });
+      }
+
+      function findSvtRuns(beats) {
+        const runs = [];
+        let current = [];
+
+        for (const beat of beats) {
+          const narrow = beat.qrsWidthMs > 0 && beat.qrsWidthMs < 120;
+          const fast = beat.rrPrevSeconds !== null && 60 / beat.rrPrevSeconds >= 150;
+          if (fast && narrow) {
+            current.push(beat);
+          } else {
+            if (current.length >= 3) {
+              runs.push(current);
+            }
+            current = [];
+          }
+        }
+
+        if (current.length >= 3) {
+          runs.push(current);
+        }
+
+        return runs;
+      }
+
+      function rhythmFlagsFromAnalysis(analysis) {
+        const notEnoughBeats = analysis.beats.length < 5;
+        const afReview = analysis.beats.length < 10;
+        const fastRun = analysis.svtRuns.at(0);
+        const fastestRunRate = fastRun
+          ? Math.max(...fastRun.map((beat) => beat.instantHrBpm ?? 0))
+          : 0;
+
+        const flags = [
+          {
+            key: "atrial_fibrillation",
+            label: "Atrial fibrillation",
+            state: afReview
+              ? "review"
+              : analysis.possibleAfib
+                ? "possible"
+                : "not flagged",
+            detail: afReview
+              ? "Need 10+ beats"
+              : `RR CV ${analysis.rrCv.toFixed(2)} | pNN50 ${Math.round(
+                  analysis.pnn50 * 100,
+                )}%`,
+          },
+          {
+            key: "bradycardia",
+            label: "Bradycardia",
+            state: notEnoughBeats
+              ? "review"
+              : analysis.meanHeartRateBpm < 60
+                ? "possible"
+                : "not flagged",
+            detail: `${analysis.meanHeartRateBpm.toFixed(0)} bpm`,
+          },
+          {
+            key: "tachycardia",
+            label: "Tachycardia",
+            state: notEnoughBeats
+              ? "review"
+              : analysis.meanHeartRateBpm > 100
+                ? "possible"
+                : "not flagged",
+            detail: `${analysis.meanHeartRateBpm.toFixed(0)} bpm`,
+          },
+          {
+            key: "sinus_with_pvcs",
+            label: "Sinus rhythm with PVCs",
+            state: notEnoughBeats
+              ? "review"
+              : analysis.pvcLikeCount > 0 && !analysis.possibleAfib
+                ? "possible"
+                : "not flagged",
+            detail: `${analysis.pvcLikeCount} PVC-like beat${
+              analysis.pvcLikeCount === 1 ? "" : "s"
+            }`,
+          },
+          {
+            key: "sinus_with_svt",
+            label: "Sinus rhythm with SVT",
+            state: notEnoughBeats
+              ? "review"
+              : analysis.svtRuns.length > 0 && !analysis.possibleAfib
+                ? "possible"
+                : "not flagged",
+            detail:
+              analysis.svtRuns.length > 0
+                ? `${analysis.svtRuns.length} run${
+                    analysis.svtRuns.length === 1 ? "" : "s"
+                  } | max ${fastestRunRate.toFixed(0)} bpm`
+                : "No regular narrow fast run",
+          },
+          {
+            key: "sinus_with_wide_qrs",
+            label: "Sinus rhythm with wide QRS",
+            state: notEnoughBeats
+              ? "review"
+              : analysis.wideQrsPattern && !analysis.possibleAfib
+                ? "possible"
+                : "not flagged",
+            detail: `median ${analysis.medianQrsWidthMs.toFixed(0)} ms | ${
+              analysis.wideQrsCount
+            } wide`,
+          },
+        ];
+
+        return flags;
+      }
+
+      function analyzeRhythm(extraction) {
+        const samples = waveformSamplesFromExtraction(extraction);
+        const { peaks, highpass } = detectRPeaks(samples, extraction.sampleRate);
+        const rrIntervals = [];
+        for (let index = 1; index < peaks.length; index += 1) {
+          rrIntervals.push((peaks[index] - peaks[index - 1]) / extraction.sampleRate);
+        }
+
+        const qrsWidths = peaks.map((peak) =>
+          estimateQrsWidthMs(peak, highpass, extraction.sampleRate),
+        );
+        const templates = beatTemplates(peaks, highpass, extraction.sampleRate);
+        const validTemplates = templates.filter(Boolean);
+        const averageTemplate =
+          validTemplates.length > 0
+            ? validTemplates[0].map((_, index) =>
+                mean(validTemplates.map((template) => template[index])),
+              )
+            : [];
+        const normalizedAverageTemplate = normalizedVector(averageTemplate);
+        const medianRr = median(rrIntervals);
+
+        const beats = peaks.map((peak, index) => {
+          const rrPrevSeconds =
+            index > 0 ? (peak - peaks[index - 1]) / extraction.sampleRate : null;
+          const rrNextSeconds =
+            index < peaks.length - 1
+              ? (peaks[index + 1] - peak) / extraction.sampleRate
+              : null;
+          const template = templates[index];
+          const morphologyCorrelation =
+            template && normalizedAverageTemplate.length > 0
+              ? correlation(template, normalizedAverageTemplate)
+              : null;
+          const qrsWidthMs = qrsWidths[index];
+          const premature =
+            rrPrevSeconds !== null && medianRr > 0 && rrPrevSeconds < 0.82 * medianRr;
+          const compensatory =
+            rrNextSeconds !== null && medianRr > 0 && rrNextSeconds > 1.1 * medianRr;
+          const wide = qrsWidthMs >= 120;
+          const morphologyOutlier =
+            morphologyCorrelation !== null && morphologyCorrelation < 0.78;
+          const pvcLike =
+            premature && (wide || morphologyOutlier) && (compensatory || morphologyOutlier);
+
+          return {
+            index,
+            sampleIndex: peak,
+            timeSeconds: peak / extraction.sampleRate,
+            rrPrevSeconds,
+            rrNextSeconds,
+            instantHrBpm: rrPrevSeconds ? 60 / rrPrevSeconds : null,
+            qrsWidthMs,
+            morphologyCorrelation,
+            premature,
+            compensatory,
+            wide,
+            morphologyOutlier,
+            pvcLike,
+            label: pvcLike ? "PVC-like" : wide ? "wide-QRS" : "",
+          };
+        });
+
+        const rrMean = mean(rrIntervals);
+        const rrSd = standardDeviation(rrIntervals);
+        const rrCv = rrMean > 0 ? rrSd / rrMean : 0;
+        const successiveDiffs = [];
+        for (let index = 1; index < rrIntervals.length; index += 1) {
+          successiveDiffs.push(Math.abs(rrIntervals[index] - rrIntervals[index - 1]));
+        }
+        const rmssd =
+          successiveDiffs.length > 0
+            ? Math.sqrt(mean(successiveDiffs.map((value) => value ** 2)))
+            : 0;
+        const pnn50 =
+          successiveDiffs.length > 0
+            ? successiveDiffs.filter((value) => value > 0.05).length /
+              successiveDiffs.length
+            : 0;
+        const meanHeartRateBpm =
+          extraction.durationSeconds > 0
+            ? (peaks.length / extraction.durationSeconds) * 60
+            : 0;
+        const medianQrsWidthMs = median(qrsWidths);
+        const wideQrsCount = beats.filter((beat) => beat.wide).length;
+        const pvcLikeCount = beats.filter((beat) => beat.pvcLike).length;
+        const svtRuns = findSvtRuns(beats);
+        const wideQrsPattern =
+          medianQrsWidthMs >= 120 ||
+          wideQrsCount >= Math.max(3, Math.ceil(beats.length * 0.2));
+        const possibleAfib =
+          beats.length >= 10 &&
+          rrCv > 0.12 &&
+          pnn50 > 0.5 &&
+          pvcLikeCount <= 2 &&
+          svtRuns.length === 0;
+        const beatBySampleIndex = new Map(
+          beats.map((beat) => [beat.sampleIndex, beat]),
+        );
+
+        const analysis = {
+          samples,
+          beats,
+          rrIntervals,
+          rrMean,
+          rrSd,
+          rrCv,
+          rmssd,
+          pnn50,
+          meanHeartRateBpm,
+          medianQrsWidthMs,
+          wideQrsCount,
+          wideQrsPattern,
+          pvcLikeCount,
+          svtRuns,
+          possibleAfib,
+          beatBySampleIndex,
+          flags: [],
+          flaggedLabels: [],
+        };
+        analysis.flags = rhythmFlagsFromAnalysis(analysis);
+        analysis.flaggedLabels = analysis.flags
+          .filter((flag) => flag.state === "possible")
+          .map((flag) => flag.label);
+        return analysis;
+      }
+
+      function rhythmCardClass(state) {
+        if (state === "possible") {
+          return "is-flagged";
+        }
+        if (state === "review") {
+          return "is-review";
+        }
+        return "is-clear";
+      }
+
+      function renderRhythm(analysis) {
+        rhythmGrid.replaceChildren();
+        const flags =
+          analysis?.flags ??
+          [
+            "Atrial fibrillation",
+            "Bradycardia",
+            "Tachycardia",
+            "Sinus rhythm with PVCs",
+            "Sinus rhythm with SVT",
+            "Sinus rhythm with wide QRS",
+          ].map((label) => ({
+            label,
+            state: "review",
+            detail: "No extracted beats",
+          }));
+
+        for (const flag of flags) {
+          const card = document.createElement("article");
+          card.className = `rhythm-card ${rhythmCardClass(flag.state)}`;
+
+          const label = document.createElement("div");
+          label.className = "rhythm-label";
+          label.textContent = flag.label;
+
+          const state = document.createElement("div");
+          state.className = "rhythm-state";
+          state.textContent = flag.state;
+
+          const detail = document.createElement("div");
+          detail.className = "rhythm-detail";
+          detail.textContent = flag.detail;
+
+          card.append(label, state, detail);
+          rhythmGrid.append(card);
+        }
+
+        rhythmNote.textContent = analysis
+          ? `Screening only | ${
+              analysis.beats.length
+            } beats | HR ${analysis.meanHeartRateBpm.toFixed(
+              0,
+            )} bpm | QRS ${analysis.medianQrsWidthMs.toFixed(0)} ms`
+          : "Screening only";
+      }
+
+      function csvEscape(value) {
+        const text = String(value);
+        if (/[",\r\n]/.test(text)) {
+          return `"${text.replaceAll('"', '""')}"`;
+        }
+        return text;
+      }
+
+      function csvFromExtraction(extraction) {
+        const headers = [
+          "sample_index",
+          "time_seconds",
+          "row",
+          "row_sample_index",
+          "row_elapsed_seconds",
+          "pdf_x_pt",
+          "pdf_y_pt",
+          "row_baseline_y_pt",
+          "millivolts",
+          "beat_index",
+          "beat_label",
+          "instant_hr_bpm",
+          "qrs_width_ms",
+          "rhythm_flags",
+        ];
+        const lines = [headers.join(",")];
+        const analysis = extraction.analysis ?? currentAnalysis;
+        const rhythmFlags = analysis?.flaggedLabels.join("; ") ?? "";
+        let sampleIndex = 0;
+
+        for (const row of extraction.rows) {
+          row.points.forEach((point, rowSampleIndex) => {
+            const beat = analysis?.beatBySampleIndex.get(sampleIndex);
+            const record = {
+              sample_index: sampleIndex,
+              time_seconds: (sampleIndex / extraction.sampleRate).toFixed(9),
+              row: row.rowNumber,
+              row_sample_index: rowSampleIndex,
+              row_elapsed_seconds: (
+                rowSampleIndex / extraction.sampleRate
+              ).toFixed(9),
+              pdf_x_pt: point.x.toFixed(5),
+              pdf_y_pt: point.y.toFixed(5),
+              row_baseline_y_pt: row.baselineY.toFixed(5),
+              millivolts: ((row.baselineY - point.y) * MV_PER_POINT_Y).toFixed(9),
+              beat_index: beat ? beat.index : "",
+              beat_label: beat?.label ?? "",
+              instant_hr_bpm: beat?.instantHrBpm
+                ? beat.instantHrBpm.toFixed(3)
+                : "",
+              qrs_width_ms: beat ? beat.qrsWidthMs.toFixed(3) : "",
+              rhythm_flags: rhythmFlags,
+            };
+            lines.push(headers.map((header) => csvEscape(record[header])).join(","));
+            sampleIndex += 1;
+          });
+        }
+
+        return `${lines.join("\n")}\n`;
+      }
+
+      function renderPreview(csv) {
+        const rows = csv.trim().split("\n").slice(1, 11);
+        previewCount.textContent = rows.length === 1 ? "1 row" : `${rows.length} rows`;
+        if (rows.length === 0) {
+          previewBody.innerHTML =
+            '<tr><td class="empty" colspan="6">No data extracted</td></tr>';
+          return;
+        }
+
+        previewBody.innerHTML = rows
+          .map((line) => {
+            const columns = line.split(",");
+            return `<tr>
+              <td>${columns[0]}</td>
+              <td>${columns[1]}</td>
+              <td>${columns[2]}</td>
+              <td>${columns[5]}</td>
+              <td>${columns[6]}</td>
+              <td>${columns[8]}</td>
+            </tr>`;
+          })
+          .join("");
+      }
+
+      function baseCsvName(file) {
+        return `${file.name.replace(/\.pdf$/i, "")}_samples.csv`;
+      }
+
+      function selectFile(file) {
+        selectedFile = file;
+        currentCsv = "";
+        currentAnalysis = null;
+        currentCsvName = file ? baseCsvName(file) : "ekg_samples.csv";
+        fileName.textContent = file ? file.name : "No file selected";
+        extractButton.disabled = !file;
+        downloadButton.disabled = true;
+        setMetrics({});
+        renderPreview("");
+        renderRhythm(null);
+        setStatus(file ? "Ready" : "Idle");
+      }
+
+      fileInput.addEventListener("change", () => {
+        selectFile(fileInput.files?.[0] ?? null);
+      });
+
+      for (const eventName of ["dragenter", "dragover"]) {
+        dropZone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropZone.classList.add("is-dragging");
+        });
+      }
+
+      for (const eventName of ["dragleave", "drop"]) {
+        dropZone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropZone.classList.remove("is-dragging");
+        });
+      }
+
+      dropZone.addEventListener("drop", (event) => {
+        const file = event.dataTransfer?.files?.[0] ?? null;
+        if (file) {
+          selectFile(file);
+        }
+      });
+
+      extractButton.addEventListener("click", async () => {
+        if (!selectedFile) {
+          return;
+        }
+
+        extractButton.disabled = true;
+        downloadButton.disabled = true;
+        setStatus("Reading PDF vector paths...");
+
+        try {
+          const extraction = await extractFromPdf(selectedFile);
+          currentAnalysis = analyzeRhythm(extraction);
+          extraction.analysis = currentAnalysis;
+          currentCsv = csvFromExtraction(extraction);
+          renderPreview(currentCsv);
+          renderRhythm(currentAnalysis);
+          setMetrics({
+            samples: extraction.sampleCount,
+            duration: `${extraction.durationSeconds.toFixed(1)}s`,
+            rate: `${extraction.sampleRate} Hz`,
+            rows: extraction.rows.map((row) => row.points.length).join(" / "),
+          });
+          downloadButton.disabled = false;
+          setStatus(
+            [
+              `Page: ${extraction.pageNumber}`,
+              `Samples: ${extraction.sampleCount}`,
+              `Sample rate: ${extraction.sampleRate} Hz`,
+              `PDF x-derived rate: ${extraction.sampleRateFromPdfSpacing.toFixed(6)} Hz`,
+              `x step: ${extraction.xStepPt.toFixed(8)} pt`,
+              `Detected beats: ${currentAnalysis.beats.length}`,
+              `Rhythm flags: ${
+                currentAnalysis.flaggedLabels.length > 0
+                  ? currentAnalysis.flaggedLabels.join(", ")
+                  : "none"
+              }`,
+            ].join("\n"),
+          );
+        } catch (error) {
+          currentCsv = "";
+          currentAnalysis = null;
+          setMetrics({});
+          renderPreview("");
+          renderRhythm(null);
+          setStatus(error instanceof Error ? error.message : String(error));
+        } finally {
+          extractButton.disabled = !selectedFile;
+        }
+      });
+
+      downloadButton.addEventListener("click", () => {
+        if (!currentCsv) {
+          return;
+        }
+        const blob = new Blob([currentCsv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = currentCsvName;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      });
+
+      renderRhythm(null);
+    </script>
+  </body>
+</html>
