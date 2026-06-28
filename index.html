@@ -1079,24 +1079,90 @@
         return { peaks, highpass, integrated, threshold };
       }
 
-      function estimateQrsWidthMs(peak, highpass, sampleRate) {
+      function qrsBaselineMillivolts(signal, peak, sampleRate) {
+        const shoulderStart = Math.round(0.12 * sampleRate);
+        const shoulderEnd = Math.round(0.22 * sampleRate);
+        const shoulderValues = [];
+
+        for (
+          let index = Math.max(0, peak - shoulderEnd);
+          index < Math.max(0, peak - shoulderStart);
+          index += 1
+        ) {
+          shoulderValues.push(signal[index]);
+        }
+        for (
+          let index = Math.min(signal.length, peak + shoulderStart);
+          index < Math.min(signal.length, peak + shoulderEnd);
+          index += 1
+        ) {
+          shoulderValues.push(signal[index]);
+        }
+
+        if (shoulderValues.length >= 3) {
+          return median(shoulderValues);
+        }
+
+        const fallbackStart = Math.max(0, peak - Math.round(0.16 * sampleRate));
+        const fallbackEnd = Math.min(
+          signal.length - 1,
+          peak + Math.round(0.16 * sampleRate),
+        );
+        return (signal[fallbackStart] + signal[fallbackEnd]) / 2;
+      }
+
+      function estimateQrsWidthMs(peak, signal, sampleRate) {
+        const baseline = qrsBaselineMillivolts(signal, peak, sampleRate);
         const searchSamples = Math.round(0.16 * sampleRate);
+        const peakSearchSamples = Math.round(0.06 * sampleRate);
         const start = Math.max(0, peak - searchSamples);
-        const end = Math.min(highpass.length - 1, peak + searchSamples);
-        const peakMagnitude = Math.abs(highpass[peak]);
+        const end = Math.min(signal.length - 1, peak + searchSamples);
+        const peakStart = Math.max(start, peak - peakSearchSamples);
+        const peakEnd = Math.min(end, peak + peakSearchSamples);
+        let qrsPeak = peak;
+
+        for (let index = peakStart; index <= peakEnd; index += 1) {
+          if (
+            Math.abs(signal[index] - baseline) >
+            Math.abs(signal[qrsPeak] - baseline)
+          ) {
+            qrsPeak = index;
+          }
+        }
+
+        const peakMagnitude = Math.abs(signal[qrsPeak] - baseline);
         if (peakMagnitude <= 0) {
           return 0;
         }
 
-        const level = Math.max(0.02, 0.1 * peakMagnitude);
-        let left = peak;
-        while (left > start && Math.abs(highpass[left]) > level) {
-          left -= 1;
+        const level = Math.max(0.02, 0.05 * peakMagnitude);
+        const quietSamples = Math.max(2, Math.round(0.012 * sampleRate));
+        let left = start;
+        let quietCount = 0;
+        for (let index = qrsPeak; index >= start; index -= 1) {
+          if (Math.abs(signal[index] - baseline) <= level) {
+            quietCount += 1;
+            if (quietCount >= quietSamples) {
+              left = index + quietSamples - 1;
+              break;
+            }
+          } else {
+            quietCount = 0;
+          }
         }
 
-        let right = peak;
-        while (right < end && Math.abs(highpass[right]) > level) {
-          right += 1;
+        let right = end;
+        quietCount = 0;
+        for (let index = qrsPeak; index <= end; index += 1) {
+          if (Math.abs(signal[index] - baseline) <= level) {
+            quietCount += 1;
+            if (quietCount >= quietSamples) {
+              right = index - quietSamples + 1;
+              break;
+            }
+          } else {
+            quietCount = 0;
+          }
         }
 
         return ((right - left) / sampleRate) * 1000;
@@ -1130,9 +1196,73 @@
         });
       }
 
+      function rrIntervalStats(rrIntervals) {
+        const rrMean = mean(rrIntervals);
+        const rrSd = standardDeviation(rrIntervals);
+        const rrCv = rrMean > 0 ? rrSd / rrMean : 0;
+        const successiveDiffs = [];
+        for (let index = 1; index < rrIntervals.length; index += 1) {
+          successiveDiffs.push(Math.abs(rrIntervals[index] - rrIntervals[index - 1]));
+        }
+        const rmssd =
+          successiveDiffs.length > 0
+            ? Math.sqrt(mean(successiveDiffs.map((value) => value ** 2)))
+            : 0;
+        const pnn50 =
+          successiveDiffs.length > 0
+            ? successiveDiffs.filter((value) => value > 0.05).length /
+              successiveDiffs.length
+            : 0;
+
+        return { rrMean, rrSd, rrCv, rmssd, pnn50 };
+      }
+
+      function normalRrIntervalsFromBeats(beats) {
+        const intervals = [];
+        for (let index = 1; index < beats.length; index += 1) {
+          const previous = beats[index - 1];
+          const beat = beats[index];
+          const interval = beat.rrPrevSeconds;
+          if (
+            interval === null ||
+            interval < 0.25 ||
+            interval > 2.5 ||
+            previous.pvcLike ||
+            beat.pvcLike ||
+            previous.wide ||
+            beat.wide ||
+            previous.morphologyOutlier ||
+            beat.morphologyOutlier
+          ) {
+            continue;
+          }
+          intervals.push(interval);
+        }
+        return intervals;
+      }
+
+      function isRegularSvtRun(run) {
+        const intervals = run
+          .map((beat) => beat.rrPrevSeconds)
+          .filter((interval) => interval !== null && interval > 0);
+        if (intervals.length < 3) {
+          return false;
+        }
+
+        const rrMean = mean(intervals);
+        const rrCv = rrMean > 0 ? standardDeviation(intervals) / rrMean : 0;
+        const rrSpread = Math.max(...intervals) - Math.min(...intervals);
+        return rrCv <= 0.1 && rrSpread <= 0.08;
+      }
+
       function findSvtRuns(beats) {
         const runs = [];
         let current = [];
+        const pushCurrent = () => {
+          if (current.length >= 3 && isRegularSvtRun(current)) {
+            runs.push(current);
+          }
+        };
 
         for (const beat of beats) {
           const narrow = beat.qrsWidthMs > 0 && beat.qrsWidthMs < 120;
@@ -1140,62 +1270,116 @@
           if (fast && narrow) {
             current.push(beat);
           } else {
-            if (current.length >= 3) {
-              runs.push(current);
-            }
+            pushCurrent();
             current = [];
           }
         }
 
-        if (current.length >= 3) {
-          runs.push(current);
-        }
+        pushCurrent();
 
         return runs;
       }
 
+      function findRateRuns(beats, predicate) {
+        const runs = [];
+        let current = [];
+        const pushCurrent = () => {
+          if (current.length >= 3) {
+            runs.push(current);
+          }
+        };
+
+        for (const beat of beats) {
+          if (beat.instantHrBpm !== null && predicate(beat.instantHrBpm)) {
+            current.push(beat);
+          } else {
+            pushCurrent();
+            current = [];
+          }
+        }
+
+        pushCurrent();
+        return runs;
+      }
+
+      function ratesFromRuns(runs) {
+        const rates = [];
+        for (const run of runs) {
+          for (const beat of run) {
+            if (beat.instantHrBpm !== null) {
+              rates.push(beat.instantHrBpm);
+            }
+          }
+        }
+        return rates;
+      }
+
       function rhythmFlagsFromAnalysis(analysis) {
         const notEnoughBeats = analysis.beats.length < 5;
-        const afReview = analysis.beats.length < 10;
-        const fastRun = analysis.svtRuns.at(0);
-        const fastestRunRate = fastRun
-          ? Math.max(...fastRun.map((beat) => beat.instantHrBpm ?? 0))
-          : 0;
+        const afNeedsBeats = analysis.beats.length < 10;
+        const svtRates = ratesFromRuns(analysis.svtRuns);
+        const fastestRunRate = svtRates.length > 0 ? Math.max(...svtRates) : 0;
+        const bradyRates = ratesFromRuns(analysis.bradycardiaRuns);
+        const slowestBradyRate =
+          bradyRates.length > 0 ? Math.min(...bradyRates) : 0;
+        const tachyRates = ratesFromRuns(analysis.tachycardiaRuns);
+        const fastestTachyRate =
+          tachyRates.length > 0 ? Math.max(...tachyRates) : 0;
+        const bradyDetail =
+          analysis.bradycardiaRuns.length > 0
+            ? `mean ${analysis.meanHeartRateBpm.toFixed(
+                0,
+              )} bpm | min ${slowestBradyRate.toFixed(0)} bpm`
+            : `${analysis.meanHeartRateBpm.toFixed(0)} bpm`;
+        const tachyDetail =
+          analysis.tachycardiaRuns.length > 0
+            ? `mean ${analysis.meanHeartRateBpm.toFixed(
+                0,
+              )} bpm | max ${fastestTachyRate.toFixed(0)} bpm`
+            : `${analysis.meanHeartRateBpm.toFixed(0)} bpm`;
+        const afDetail = afNeedsBeats
+          ? "Need 10+ beats"
+          : analysis.afibNeedsReview
+            ? `NN ${analysis.nnIntervals.length} intervals | raw RR irregular`
+            : `NN RR CV ${analysis.rrCv.toFixed(2)} | pNN50 ${Math.round(
+                analysis.pnn50 * 100,
+              )}%`;
+        const afState = afNeedsBeats
+          ? "review"
+          : analysis.possibleAfib
+            ? "possible"
+            : analysis.afibNeedsReview
+              ? "review"
+              : "not flagged";
 
         const flags = [
           {
             key: "atrial_fibrillation",
             label: "Atrial fibrillation",
-            state: afReview
-              ? "review"
-              : analysis.possibleAfib
-                ? "possible"
-                : "not flagged",
-            detail: afReview
-              ? "Need 10+ beats"
-              : `RR CV ${analysis.rrCv.toFixed(2)} | pNN50 ${Math.round(
-                  analysis.pnn50 * 100,
-                )}%`,
+            state: afState,
+            detail: afDetail,
           },
           {
             key: "bradycardia",
             label: "Bradycardia",
             state: notEnoughBeats
               ? "review"
-              : analysis.meanHeartRateBpm < 60
+              : analysis.meanHeartRateBpm < 60 ||
+                  analysis.bradycardiaRuns.length > 0
                 ? "possible"
                 : "not flagged",
-            detail: `${analysis.meanHeartRateBpm.toFixed(0)} bpm`,
+            detail: bradyDetail,
           },
           {
             key: "tachycardia",
             label: "Tachycardia",
             state: notEnoughBeats
               ? "review"
-              : analysis.meanHeartRateBpm > 100
+              : analysis.meanHeartRateBpm > 100 ||
+                  analysis.tachycardiaRuns.length > 0
                 ? "possible"
                 : "not flagged",
-            detail: `${analysis.meanHeartRateBpm.toFixed(0)} bpm`,
+            detail: tachyDetail,
           },
           {
             key: "sinus_with_pvcs",
@@ -1243,6 +1427,7 @@
 
       function analyzeRhythm(extraction) {
         const samples = waveformSamplesFromExtraction(extraction);
+        const signal = samples.map((sample) => sample.millivolts);
         const { peaks, highpass } = detectRPeaks(samples, extraction.sampleRate);
         const rrIntervals = [];
         for (let index = 1; index < peaks.length; index += 1) {
@@ -1250,7 +1435,7 @@
         }
 
         const qrsWidths = peaks.map((peak) =>
-          estimateQrsWidthMs(peak, highpass, extraction.sampleRate),
+          estimateQrsWidthMs(peak, signal, extraction.sampleRate),
         );
         const templates = beatTemplates(peaks, highpass, extraction.sampleRate);
         const validTemplates = templates.filter(Boolean);
@@ -1304,22 +1489,9 @@
           };
         });
 
-        const rrMean = mean(rrIntervals);
-        const rrSd = standardDeviation(rrIntervals);
-        const rrCv = rrMean > 0 ? rrSd / rrMean : 0;
-        const successiveDiffs = [];
-        for (let index = 1; index < rrIntervals.length; index += 1) {
-          successiveDiffs.push(Math.abs(rrIntervals[index] - rrIntervals[index - 1]));
-        }
-        const rmssd =
-          successiveDiffs.length > 0
-            ? Math.sqrt(mean(successiveDiffs.map((value) => value ** 2)))
-            : 0;
-        const pnn50 =
-          successiveDiffs.length > 0
-            ? successiveDiffs.filter((value) => value > 0.05).length /
-              successiveDiffs.length
-            : 0;
+        const rawRrStats = rrIntervalStats(rrIntervals);
+        const nnIntervals = normalRrIntervalsFromBeats(beats);
+        const nnRrStats = rrIntervalStats(nnIntervals);
         const meanHeartRateBpm =
           extraction.durationSeconds > 0
             ? (peaks.length / extraction.durationSeconds) * 60
@@ -1328,15 +1500,23 @@
         const wideQrsCount = beats.filter((beat) => beat.wide).length;
         const pvcLikeCount = beats.filter((beat) => beat.pvcLike).length;
         const svtRuns = findSvtRuns(beats);
+        const bradycardiaRuns = findRateRuns(beats, (rate) => rate < 60);
+        const tachycardiaRuns = findRateRuns(beats, (rate) => rate > 100);
         const wideQrsPattern =
           medianQrsWidthMs >= 120 ||
           wideQrsCount >= Math.max(3, Math.ceil(beats.length * 0.2));
+        const enoughNnIntervalsForAfib = nnIntervals.length >= 6;
         const possibleAfib =
           beats.length >= 10 &&
-          rrCv > 0.12 &&
-          pnn50 > 0.5 &&
-          pvcLikeCount <= 2 &&
-          svtRuns.length === 0;
+          enoughNnIntervalsForAfib &&
+          nnRrStats.rrCv > 0.12 &&
+          nnRrStats.pnn50 > 0.5;
+        const afibNeedsReview =
+          beats.length >= 10 &&
+          !possibleAfib &&
+          !enoughNnIntervalsForAfib &&
+          rawRrStats.rrCv > 0.12 &&
+          rawRrStats.pnn50 > 0.5;
         const beatBySampleIndex = new Map(
           beats.map((beat) => [beat.sampleIndex, beat]),
         );
@@ -1345,17 +1525,26 @@
           samples,
           beats,
           rrIntervals,
-          rrMean,
-          rrSd,
-          rrCv,
-          rmssd,
-          pnn50,
+          nnIntervals,
+          rrMean: nnRrStats.rrMean,
+          rrSd: nnRrStats.rrSd,
+          rrCv: nnRrStats.rrCv,
+          rmssd: nnRrStats.rmssd,
+          pnn50: nnRrStats.pnn50,
+          rawRrMean: rawRrStats.rrMean,
+          rawRrSd: rawRrStats.rrSd,
+          rawRrCv: rawRrStats.rrCv,
+          rawRmssd: rawRrStats.rmssd,
+          rawPnn50: rawRrStats.pnn50,
           meanHeartRateBpm,
           medianQrsWidthMs,
           wideQrsCount,
           wideQrsPattern,
           pvcLikeCount,
           svtRuns,
+          bradycardiaRuns,
+          tachycardiaRuns,
+          afibNeedsReview,
           possibleAfib,
           beatBySampleIndex,
           flags: [],

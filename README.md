@@ -18,8 +18,13 @@ The exported CSV includes:
 - original PDF coordinates
 - row baseline
 - estimated millivolts
+- detected beat labels, instantaneous heart rate, QRS width, and screening rhythm flags
 
 The page also reports extraction metadata such as sample count, sample rate, duration, source pages, and ECG-derived rhythm measurements.
+
+## Rhythm Screening
+
+The browser app runs a screening-only single-lead rhythm review after extraction. It estimates R peaks, QRS width, normal-to-normal RR variability, regular narrow fast runs, and sustained bradycardia or tachycardia episodes to flag rhythms for review. It is not a diagnostic device and should not be used as a substitute for clinical interpretation.
 
 ## PDF Requirements
 
@@ -31,22 +36,6 @@ The conversion assumes standard ECG paper calibration:
 
 - 25 mm/s
 - 10 mm/mV
-
-## Optional Python Extractor
-
-The repository also includes `extract_ecg_from_pdf.py`, a command-line extractor that uses `qpdf` to parse PDF vector content and write CSV plus metadata files.
-
-```bash
-uvx ruff check extract_ecg_from_pdf.py
-uvx ty check extract_ecg_from_pdf.py
-python extract_ecg_from_pdf.py path/to/ekg.pdf
-```
-
-Install `qpdf` before using the Python extractor.
-
-```bash
-brew install qpdf
-```
 
 ## Deploying to GitHub Pages
 
